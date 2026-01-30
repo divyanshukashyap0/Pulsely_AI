@@ -1,0 +1,195 @@
+// Prisma Schema for Pulsely AI Fitness Tracker
+// MySQL 8.0 with optimized indexes and relationships
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// User authentication and profile
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique @db.VarChar(255)
+  passwordHash String   @db.VarChar(255)
+  name         String?  @db.VarChar(255)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relationships
+  workouts        Workout[]
+  workoutSets     WorkoutSet[]
+  recoveryData    RecoveryData[]
+  chatMessages    ChatMessage[]
+  goals           Goal[]
+  readinessScores ReadinessScore[]
+
+  @@index([email])
+  @@map("users")
+}
+
+// Workout sessions
+model Workout {
+  id          String    @id @default(uuid())
+  userId      String
+  name        String    @db.VarChar(255)
+  type        String    @db.VarChar(100) // strength, cardio, flexibility, etc.
+  duration    Int? // in minutes
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  notes       String?   @db.Text
+
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sets      WorkoutSet[]
+  exercises WorkoutExercise[]
+
+  @@index([userId, startedAt])
+  @@index([userId, type])
+  @@map("workouts")
+}
+
+// Exercise definitions (master data)
+model Exercise {
+  id              String   @id @default(uuid())
+  name            String   @unique @db.VarChar(255)
+  category        String   @db.VarChar(100) // strength, cardio, flexibility
+  muscleGroups    String   @db.VarChar(500) // JSON array of muscle groups
+  description     String?  @db.Text
+  instructions    String?  @db.Text
+  isPoseTrackable Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  workoutExercises WorkoutExercise[]
+
+  @@index([category])
+  @@index([name])
+  @@map("exercises")
+}
+
+// Exercises performed in a workout
+model WorkoutExercise {
+  id         String  @id @default(uuid())
+  workoutId  String
+  exerciseId String
+  order      Int     @default(0)
+  notes      String? @db.Text
+
+  workout  Workout      @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  exercise Exercise     @relation(fields: [exerciseId], references: [id])
+  sets     WorkoutSet[]
+
+  @@index([workoutId])
+  @@index([exerciseId])
+  @@map("workout_exercises")
+}
+
+// Sets performed for an exercise
+model WorkoutSet {
+  id                String   @id @default(uuid())
+  workoutExerciseId String
+  userId            String
+  setNumber         Int
+  reps              Int?
+  weight            Float? // in kg
+  duration          Int? // in seconds (for time-based exercises)
+  distance          Float? // in meters (for cardio)
+  restSeconds       Int? // rest time after this set
+  completedAt       DateTime @default(now())
+  poseScore         Float? // AI posture score (0-100)
+  repCount          Int? // AI-detected rep count
+
+  workoutExercise WorkoutExercise @relation(fields: [workoutExerciseId], references: [id], onDelete: Cascade)
+  user            User            @relation(fields: [userId], references: [id])
+  Workout         Workout?        @relation(fields: [workoutId], references: [id])
+  workoutId       String?
+
+  @@index([workoutExerciseId])
+  @@index([userId, completedAt])
+  @@map("workout_sets")
+}
+
+// Recovery and readiness tracking
+model RecoveryData {
+  id           String   @id @default(uuid())
+  userId       String
+  date         DateTime @default(now())
+  sleepHours   Float? // hours of sleep
+  sleepQuality Int? // 1-10 scale
+  fatigueLevel Int? // 1-10 scale
+  stressLevel  Int? // 1-10 scale
+  soreness     Int? // 1-10 scale (muscle soreness)
+  notes        String?  @db.Text
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+  @@map("recovery_data")
+}
+
+// Calculated readiness scores
+model ReadinessScore {
+  id           String   @id @default(uuid())
+  userId       String
+  date         DateTime @default(now())
+  score        Int // 0-100 overall readiness
+  sleepScore   Float? // 0-100
+  fatigueScore Float? // 0-100
+  strainScore  Float? // 0-100 (workout strain from previous day)
+  factors      String?  @db.Text // JSON object with detailed factors
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+  @@map("readiness_scores")
+}
+
+// User fitness goals
+model Goal {
+  id           String    @id @default(uuid())
+  userId       String
+  type         String    @db.VarChar(100) // weight_loss, muscle_gain, endurance, etc.
+  target       String    @db.VarChar(255) // e.g., "Lose 10kg", "Bench 100kg"
+  targetDate   DateTime?
+  currentValue String?   @db.VarChar(255)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isActive])
+  @@map("goals")
+}
+
+// AI Chat messages for fitness coaching
+model ChatMessage {
+  id        String   @id @default(uuid())
+  userId    String
+  role      String   @db.VarChar(20) // user, assistant, system
+  content   String   @db.Text
+  metadata  String?  @db.Text // JSON for additional data
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("chat_messages")
+}
+
+// AI-generated workout plans
+model WorkoutPlan {
+  id        String   @id @default(uuid())
+  userId    String
+  name      String   @db.VarChar(255)
+  goal      String?  @db.VarChar(255)
+  planData  String   @db.Text // JSON with exercises, sets, reps, etc.
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, isActive])
+  @@map("workout_plans")
+}
