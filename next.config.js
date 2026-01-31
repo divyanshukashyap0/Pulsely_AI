@@ -6,10 +6,11 @@ const nextConfig = {
   },
   // API routes will be handled by Next.js API routes
   async rewrites() {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
     return [
       {
         source: '/api/backend/:path*',
-        destination: 'http://localhost:3001/api/:path*',
+        destination: `${apiUrl}/:path*`,
       },
     ];
   },
