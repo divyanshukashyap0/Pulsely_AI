@@ -8,6 +8,7 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
+    "@fastify/cors": "^8.5.0",
     "@google/generative-ai": "^0.24.1",
     "@prisma/client": "^5.7.1",
     "axios": "^1.6.2",
@@ -23,5 +24,8 @@
     "prisma": "^5.7.1",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
+  },
+  "prisma": {
+    "schema": "prisma/schema.prisma"
   }
 }
