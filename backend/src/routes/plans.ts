@@ -1,53 +1,54 @@
-import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
-import prisma from '../lib/prisma.js';
-import { authenticate } from '../middleware/auth.js';
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
+import { z } from 'zod'
+import prisma from '../lib/prisma.js'
+import { authenticate } from '../middleware/auth.js'
 
 const createPlanSchema = z.object({
   name: z.string().min(1),
   goal: z.string().optional(),
-  planData: z.record(z.any()), // JSON object with workout plan structure
-});
+  planData: z.record(z.any()),
+})
 
 /**
  * AI Workout Planner routes
- * Generates and manages workout plans based on user history and goals
  */
 export default async function planRoutes(fastify: FastifyInstance) {
-  fastify.addHook('onRequest', authenticate);
+  fastify.addHook('onRequest', authenticate)
 
   // Get all workout plans
   fastify.get('/', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const userId = request.user!.userId;
+      const userId = request.user!.userId
 
       const plans = await prisma.workoutPlan.findMany({
         where: { userId },
         orderBy: { createdAt: 'desc' },
-      });
+      })
 
-      reply.send({ plans });
+      reply.send({ plans })
     } catch (error) {
-      fastify.log.error(error);
-      reply.code(500).send({ error: 'Internal server error' });
+      fastify.log.error(error)
+      reply.code(500).send({ error: 'Internal server error' })
     }
-  });
+  })
 
   // Generate AI workout plan
   fastify.post('/generate', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const userId = request.user!.userId;
+      const userId = request.user!.userId
       const { goal, daysPerWeek = 3, focus } = request.query as {
-        goal?: string;
-        daysPerWeek?: number;
-        focus?: string;
-      };
+        goal?: string
+        daysPerWeek?: number
+        focus?: string
+      }
 
-      // Get user's workout history for progressive overload
+      // Get recent workouts
       const recentWorkouts = await prisma.workout.findMany({
         where: {
           userId,
-          startedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+          startedAt: {
+            gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+          },
         },
         include: {
           exercises: {
@@ -59,51 +60,46 @@ export default async function planRoutes(fastify: FastifyInstance) {
         },
         orderBy: { startedAt: 'desc' },
         take: 10,
-      });
+      })
 
-      // Analyze workout patterns
-      const exerciseFrequency: Record<string, number> = {};
-      const maxWeights: Record<string, number> = {};
-      const avgReps: Record<string, number> = {};
+      const exerciseFrequency: Record<string, number> = {}
+      const maxWeights: Record<string, number> = {}
+      const avgRepsAccumulator: Record<string, { sum: number; count: number }> = {}
+      const avgReps: Record<string, number> = {}
 
       recentWorkouts.forEach((workout) => {
         workout.exercises.forEach((we) => {
-          const exerciseName = we.exercise.name;
-          exerciseFrequency[exerciseName] = (exerciseFrequency[exerciseName] || 0) + 1;
+          const name = we.exercise.name
+          exerciseFrequency[name] = (exerciseFrequency[name] || 0) + 1
 
           we.sets.forEach((set) => {
-            if (set.weight) {
-              maxWeights[exerciseName] = Math.max(
-                maxWeights[exerciseName] || 0,
-                set.weight
-              );
+            if (typeof set.weight === 'number') {
+              maxWeights[name] = Math.max(maxWeights[name] || 0, set.weight)
             }
-            if (set.reps) {
-              const current = avgReps[exerciseName] || { sum: 0, count: 0 };
-              avgReps[exerciseName] = {
+
+            if (typeof set.reps === 'number') {
+              const current = avgRepsAccumulator[name] || { sum: 0, count: 0 }
+              avgRepsAccumulator[name] = {
                 sum: current.sum + set.reps,
                 count: current.count + 1,
-              };
+              }
             }
-          });
-        });
-      });
+          })
+        })
+      })
 
-      // Calculate averages
-      Object.keys(avgReps).forEach((ex) => {
-        const data = avgReps[ex];
-        avgReps[ex] = Math.round(data.sum / data.count);
-      });
+      Object.keys(avgRepsAccumulator).forEach((ex) => {
+        const data = avgRepsAccumulator[ex]
+        avgReps[ex] = Math.round(data.sum / data.count)
+      })
 
-      // Get available exercises
       const availableExercises = await prisma.exercise.findMany({
         where: {
           category: focus || undefined,
         },
         take: 50,
-      });
+      })
 
-      // Generate workout plan using progressive overload logic
       const plan = generateWorkoutPlan(
         availableExercises,
         exerciseFrequency,
@@ -111,9 +107,8 @@ export default async function planRoutes(fastify: FastifyInstance) {
         avgReps,
         Number(daysPerWeek),
         goal || 'general_fitness'
-      );
+      )
 
-      // Save plan
       const savedPlan = await prisma.workoutPlan.create({
         data: {
           userId,
@@ -121,20 +116,20 @@ export default async function planRoutes(fastify: FastifyInstance) {
           goal: goal || 'general_fitness',
           planData: JSON.stringify(plan),
         },
-      });
+      })
 
-      reply.send({ plan: savedPlan });
+      reply.send({ plan: savedPlan })
     } catch (error) {
-      fastify.log.error(error);
-      reply.code(500).send({ error: 'Internal server error' });
+      fastify.log.error(error)
+      reply.code(500).send({ error: 'Internal server error' })
     }
-  });
+  })
 
   // Create custom plan
   fastify.post('/', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const userId = request.user!.userId;
-      const body = createPlanSchema.parse(request.body);
+      const userId = request.user!.userId
+      const body = createPlanSchema.parse(request.body)
 
       const plan = await prisma.workoutPlan.create({
         data: {
@@ -143,18 +138,18 @@ export default async function planRoutes(fastify: FastifyInstance) {
           goal: body.goal,
           planData: JSON.stringify(body.planData),
         },
-      });
+      })
 
-      reply.code(201).send({ plan });
+      reply.code(201).send({ plan })
     } catch (error) {
       if (error instanceof z.ZodError) {
-        reply.code(400).send({ error: 'Validation error', details: error.errors });
-        return;
+        reply.code(400).send({ error: 'Validation error', details: error.errors })
+        return
       }
-      fastify.log.error(error);
-      reply.code(500).send({ error: 'Internal server error' });
+      fastify.log.error(error)
+      reply.code(500).send({ error: 'Internal server error' })
     }
-  });
+  })
 }
 
 /**
@@ -167,50 +162,44 @@ function generateWorkoutPlan(
   avgReps: Record<string, number>,
   daysPerWeek: number,
   goal: string
-): any {
-  const plan: any = {
+) {
+  const plan = {
     daysPerWeek,
     goal,
-    workouts: [],
-  };
+    workouts: [] as any[],
+  }
 
-  // Select exercises based on frequency (prefer less frequent for variety)
-  const sortedExercises = exercises.sort((a, b) => {
-    const freqA = frequency[a.name] || 0;
-    const freqB = frequency[b.name] || 0;
-    return freqA - freqB;
-  });
+  const sortedExercises = [...exercises].sort((a, b) => {
+    return (frequency[a.name] || 0) - (frequency[b.name] || 0)
+  })
 
-  // Create workouts for each day
   for (let day = 1; day <= daysPerWeek; day++) {
-    const workout: any = {
+    const workout = {
       day,
-      exercises: [],
-    };
+      exercises: [] as any[],
+    }
 
-    // Select 4-6 exercises per workout
-    const exercisesForDay = sortedExercises.slice((day - 1) * 5, day * 5);
+    const exercisesForDay = sortedExercises.slice((day - 1) * 5, day * 5)
 
     exercisesForDay.forEach((exercise) => {
-      const currentMax = maxWeights[exercise.name] || 0;
-      const currentReps = avgReps[exercise.name] || 8;
+      const currentMax = maxWeights[exercise.name] || 0
+      const currentReps = avgReps[exercise.name] || 8
 
-      // Progressive overload: increase weight by 2.5-5% or reps by 1-2
-      const newWeight = currentMax > 0 ? currentMax * 1.025 : 20; // 2.5% increase
-      const newReps = currentReps + 1; // Add 1 rep
+      const newWeight = currentMax > 0 ? currentMax * 1.025 : 20
+      const newReps = Math.min(currentReps + 1, 12)
 
       workout.exercises.push({
         exerciseId: exercise.id,
         exerciseName: exercise.name,
         sets: 3,
-        reps: Math.min(newReps, 12), // Cap at 12 reps
-        weight: Math.round(newWeight * 2) / 2, // Round to nearest 0.5kg
+        reps: newReps,
+        weight: Math.round(newWeight * 2) / 2,
         restSeconds: 60,
-      });
-    });
+      })
+    })
 
-    plan.workouts.push(workout);
+    plan.workouts.push(workout)
   }
 
-  return plan;
+  return plan
 }
