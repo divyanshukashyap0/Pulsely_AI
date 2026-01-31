@@ -15,12 +15,24 @@ import base64
 from io import BytesIO
 from PIL import Image
 
+import os
+
 app = FastAPI(title="Pulsely AI Service", version="1.0.0")
 
 # CORS configuration
+origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+]
+
+# Add production frontend URL from environment
+frontend_url = os.getenv("FRONTEND_URL")
+if frontend_url:
+    origins.append(frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
